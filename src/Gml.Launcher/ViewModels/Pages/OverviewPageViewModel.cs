@@ -27,6 +27,7 @@ using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Reactive.Concurrency;
+using System.Reactive.Disposables;
 using System.Reactive.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -54,7 +55,6 @@ public class OverviewPageViewModel : PageViewModelBase
     private readonly IStorageService _storageService;
     private readonly ISystemService _systemService;
     private readonly IBackendChecker _backendChecker;
-    private Process? _gameProcess;
     private readonly ISettingsService _settingsService;
     private readonly IDisposable? _speedSubscription;
 
@@ -243,6 +243,7 @@ public class OverviewPageViewModel : PageViewModelBase
     {
         var tokenSource = new CancellationTokenSource();
         var cancellationToken = tokenSource.Token;
+        var disposable =  new CompositeDisposable();
 
         await ExecuteFromNewThread(async () =>
         {
@@ -254,6 +255,11 @@ public class OverviewPageViewModel : PageViewModelBase
                     true);
 
                 var profileInfo = await GetProfileInfo();
+
+                _gmlManager.Gameloader.GameLaunched
+                    .ObserveOn(RxApp.MainThreadScheduler)
+                    .Subscribe(c => _mainViewModel._gameLaunched.OnNext(true))
+                    .DisposeWith(disposable);
 
                 await _gmlManager.Gameloader.StartGameAsync(profileInfo, !_backendChecker.IsOffline);
             }
@@ -309,7 +315,7 @@ public class OverviewPageViewModel : PageViewModelBase
             }
             finally
             {
-                _gameProcess?.Dispose();
+                disposable.Dispose();
                 Dispatcher.UIThread.Invoke(() => _mainViewModel._gameLaunched.OnNext(false));
                 UpdateProgress(string.Empty, string.Empty, false);
                 if (!_backendChecker.IsOffline)
@@ -406,7 +412,7 @@ public class OverviewPageViewModel : PageViewModelBase
     {
         try
         {
-            _gameProcess?.Kill();
+            _gmlManager.Gameloader.ForceStop();
         }
         catch (Exception exception)
         {
